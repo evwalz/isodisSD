@@ -10,7 +10,7 @@ Applies isotonic distributional regression ([IDR](https://academic.oup.com/jrsss
 
 To build and install clone repository and run
 
-``` pip install ./isodisreg   ```
+``` pip install ./isodisSD   ```
 
 ## Example
 
