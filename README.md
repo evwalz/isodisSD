@@ -1,5 +1,5 @@
 
-# isodisregSD
+# isodisSD
 
 <!-- badges: start -->
 <!-- badges: end -->
