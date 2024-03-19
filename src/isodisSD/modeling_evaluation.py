@@ -9,10 +9,11 @@ import dc_stat_think as dcst
 from collections import defaultdict
 import osqp
 from .pava import pavaDec, pavaCorrect
-from .partialorders import comp_ord, tr_reduc, neighbor_points
+from .partialorders import comp_ord, tr_reduc, neighbor_points, ecdf_crps
 import random
 import bisect
-from _isodisSD import isocdf_seq
+import properscoring as ps
+from _isodisSD import isocdf_seq, ecdf_comp_class_sd, compOrd_cpp, normal_comp_sd, normal_comp_sd_ab
 
 class predictions_idr(object):
 
@@ -295,16 +296,18 @@ class idrpredict(object):
     
         
 
-class idrobject:
-        def __init__(self, ecdf, thresholds, indices, X, y,groups, orders, constraints):
+class idrcal:
+        def __init__(self, ecdf, thresholds, indices, X, y, constr, type, grid, crps):
             self.ecdf = ecdf
             self.thresholds = thresholds 
             self.indices = indices
             self.X = X
             self.y = y
-            self.groups = groups 
-            self.orders = orders
-            self.constraints = constraints
+            self.Ord = constr
+            self.grid = grid
+            self.type = type
+            self.org_crps = crps
+
             
         def predict(self, data=None, digits = 3):
             """
@@ -484,7 +487,7 @@ def prepareData(X, groups, orders):
                 X[val] = np.cumsum(tmp, axis=1)
     return X
 
-def idr (y, X, groups = None, orders = dict({"1":"comp"}), verbose = False, max_iter = 10000, eps_rel = 0.00001, eps_abs = 0.00001, progress = True):
+def idrsd (y, X = None,grid = None, dis_func = None, type = 'ensemble' ,inta = None, intb = None, org_crps = False, verbose = False, max_iter = 10000, eps_rel = 0.00001, eps_abs = 0.00001, progress = True, *args):
     """
     Fits isotonic distirbutional regression (IDR) to a training dataset. 
 
@@ -492,16 +495,12 @@ def idr (y, X, groups = None, orders = dict({"1":"comp"}), verbose = False, max_
     ----------
     y : np.array
         one dimensional array (response variable)
-    X : pd.DataFrame
-        data frame of variables (regression covariates)
-    groups : dictionary
-        denoting groups of variables that are to be ordered with the same order.
-        Only relevant if X contains more than one variable
-        The default uses one group for all variables
-    orders : dictionary
-        denotes the order that is applied to a group.
-        Only relevant if X contains mode than one variable
-        The default is dict({"1":"comp"}).
+    X : distributional forecast specified by 'type'
+    type : type of input data X
+    grid : threshold values of ECDFs in X, only required if X is matrix of ECDFs.
+    dis_func : specifies parametric forecast distribution. Note that parameters of distribution must be provided 
+    inta : lower bound for grid computation of isodisSD
+    intb : upper bound for grid computation of isodisSD
     (OSQP Solver Setting)
     verbose : boolean
         print output of OSQP solver. The default is False
@@ -523,101 +522,254 @@ def idr (y, X, groups = None, orders = dict({"1":"comp"}), verbose = False, max_
         constraints: in multivariate IDR is None, 
         otherwise the order constraints for optimization
     """
-    if not isinstance(X, pd.DataFrame):
-        raise ValueError("X must be a pandas data frame")
-    
-    if groups is None:
-        groups = dict(zip(X.columns, np.ones(X.shape[1])))
+    #if not isinstance(X, pd.DataFrame):
+    #   raise ValueError("X must be a pandas data frame")
     
     y = np.asarray(y)
     
     if y.ndim > 1:
         raise ValueError('idr only handles 1-D arrays of observations')
     
-    if isinstance(X, pd.DataFrame) == False:
-        raise ValueError("data must be a pandas data frame")
-    
-    if X.shape[0] <= 1:
-        raise ValueError('X must have more than 1 row')
-    
     if np.isnan(np.sum(y)) == True:
         raise ValueError("y contains nan values")
-	
-    if X.isnull().values.any() == True:
-        raise ValueError("X contains nan values")
+	 
     
-    if y.size != X.shape[0]:
-        raise ValueError("length of y must match number of rows in X")
-    
-    if all(item in  ['comp', 'icx', 'sd'] for item in orders.values()) == False:
-        raise ValueError("orders must be in comp, icx, sd")
-    
-    M =  all(elem in groups.keys() for elem in X.columns)  
-    if M == False:
-        raise ValueError("some variables must be used in groups and in X")
+    #M =  all(elem in groups.keys() for elem in X.columns)  
+    #if M == False:
+    #    raise ValueError("some variables must be used in groups and in X")
     
     thresholds = np.sort(np.unique(y))
     nThr = len(thresholds)
     
     if nThr == 1:
         raise ValueError("y must contain more than 1 distinct value")
-    Xp = X.copy()
-    Xp = prepareData(Xp, groups, orders)
-    nVar = Xp.shape[1]
-    oldNames = Xp.columns 
-    Xp['y'] = y
-    Xp['ind'] = np.arange(len(y))
-    tt = list(oldNames)
-    X_grouped = Xp.groupby(tt).agg({'y':list, 'ind':list})
-    X_grouped = X_grouped.sort_values(by=list(oldNames)[::-1])
-    X_grouped = X_grouped.reset_index()
-    cpY = X_grouped["y"]
-    indices = X_grouped["ind"]
-    Xp = X_grouped[tt]
-    lenlist = np.vectorize(len)
-    weights = lenlist(indices)
-    N = Xp.shape[0]
-    if nVar == 1:
-        constr = None
-        rep_time = [len(x) for x in indices]
-        flat_indices = [item for sublist in cpY for item in sublist]
-        posY = np.repeat(np.arange(len(indices)), rep_time)[np.argsort(flat_indices, kind="mergesort")]
-        cdf_vec = isocdf_seq(np.array(weights), np.ones(y.shape[0]), np.sort(y), posY, thresholds)
-        cdf1 = np.reshape(cdf_vec, (N, nThr), order="F")
+    
+    original_crps = NULL
+    
+    if type == 'idr':
+        if type(X).__name__ == 'idrpredict':
+            if (org_crps):
+                original_crps = np.mean(X.crps(y))
+            predictions = X.predictions
+            if type(predictions) is not list:
+                raise ValueError("predictions must be a list")
+            def get_points(predictions):
+                return np.array(predictions.points)
+            def get_cdf(predictions):
+                return np.array(predictions.ecdf)
+            grid = list(map(get_points, predictions))
+            X = list(map(get_cdf, predictions))
+        else:
+            raise ValueError('wrong X for type idr')
+
+    if type == 'ensemble':
+        if isinstance(X, pd.DataFrame) == False:
+            raise ValueError("data must be a pandas data frame")
+    
+        if X.shape[0] <= 1:
+            raise ValueError('X must have more than 1 row')
+
+        if X.isnull().values.any() == True:
+            raise ValueError("X contains nan values")
+        
+        if y.size != X.shape[0]:
+            raise ValueError("length of y must match number of rows in X")
+        
+        #nVar = X.shape[1]
+        #oldNames = X.columns 
+
+        if org_crps:
+            original_crps = np.mean(ps.crps_ensemble(y, X.to_numpy()))
+
+        Xp = X.to_numpy()
+        nVar = Xp.shape[1]
+        oldNames = Xp.columns 
+        Xp['y'] = y
+        Xp['ind'] = np.arange(len(y))
+        tt = list(oldNames)
+        X_grouped = Xp.groupby(tt).agg({'y':list, 'ind':list})
+        X_grouped = X_grouped.sort_values(by=list(oldNames)[::-1])
+        X_grouped = X_grouped.reset_index()
+        cpY = X_grouped["y"]
+        indices = X_grouped["ind"]
+        Xp = X_grouped[tt]
+        lenlist = np.vectorize(len)
+        weights = lenlist(indices)
+        N = Xp.shape[0]
+        # implement function compOrd_cpp
+        M = compOrd_cpp(Xp.to_numpy())
+        paths = np.column_stack(np.where(M == 1))
+        constr = list()
+        constr.append(M)
+        constr.append(paths)
+
+    elif type == 'normal':
+        # Check if X has two columns
+        if X.shape[1] != 2:
+            raise ValueError("'X' must contain two columns with mean and std")
+
+        # Check if X contains numeric variables
+        if not all(np.issubdtype(col.dtype, np.number) for col in X.T):
+            raise ValueError("'X' must contain numeric variables")
+
+        # Check if X and y contain NAs
+        if np.any(np.isnan(X)) or np.any(np.isnan(y)):
+            raise ValueError("'X' and 'y' must not contain NAs")
+
+        # Check if length(y) and nrow(X) match
+        if len(y) != X.shape[0]:
+            raise ValueError("length(y) and nrow(X) must match")
+
+        # Check if sigma is positive
+        if np.any(X[:, 1] < 0):
+            raise ValueError("sigma must be positive")
+        
+        if org_crps:
+            original_crps = np.mean(ps.crps_gaussian(y, X[:,0], X[:,1]))
+
+        Xp = pd.DataFrame(data = {'mu':X[:,0], 'sg':X[:, 1]})
+        oldNames = Xp.columns 
+        tt = list(oldNames)
+        Xp['y'] = y
+        Xp['ind'] = np.arange(len(y))
+        class_X_grouped = class_X.groupby(tt).agg({'y':list, 'ind':list})
+        class_X_grouped = class_X_grouped.reset_index()
+        cpY = class_X_grouped["y"]
+        indices = class_X_grouped["ind"]
+        lenlist = np.vectorize(len)
+        weights = lenlist(indices)
+        X = class_X_grouped[tt].to_numpy()
+        M = normal_comp_sd(X)
+        paths = np.column_stack(np.where(M == 1))
+        constr = list()
+        constr.append(M)
+        constr.append(paths)
+        nVar = 2
+        N = X.shape[0]
+            
+    elif type == 'normal_ab':
+        # Check if X has two columns
+        if X.shape[1] != 2:
+            raise ValueError("'X' must contain two columns with mean and std")
+
+        # Check if X contains numeric variables
+        if not np.all(np.apply_along_axis(lambda col: np.issubdtype(col.dtype, np.number), 0, X)):
+            raise ValueError("'X' must contain numeric variables")
+
+        # Check if X and y contain NAs
+        if np.any(np.isnan(X)) or np.any(np.isnan(y)):
+            raise ValueError("'X' and 'y' must not contain NAs")
+
+        # Check if length(y) and nrow(X) match
+        if X.shape[0] != len(y):
+            raise ValueError("length(y) and nrow(X) must match")
+
+        # Check if sigma is positive
+        if not np.all(X[:, 1] >= 0):
+            raise ValueError("sigma bust be positive")
+
+        # Check if inta and intb are defined
+        if inta is None or intb is None:
+            raise ValueError("define a and b")
+
+        # Check if inta is smaller than intb
+        if inta >= intb:
+            raise ValueError("a must be smaller than b")
+        
+
+        if org_crps:
+            original_crps = np.mean(crps_gaussian_limit(y, X[:,0], X[:,1], inta, intb))
+
+        Xp = pd.DataFrame(data = {'mu':X[:,0], 'sg':X[:, 1]})
+        oldNames = Xp.columns 
+        tt = list(oldNames)
+        Xp['y'] = y
+        Xp['ind'] = np.arange(len(y))
+        class_X_grouped = class_X.groupby(tt).agg({'y':list, 'ind':list})
+        class_X_grouped = class_X_grouped.reset_index()
+        cpY = class_X_grouped["y"]
+        indices = class_X_grouped["ind"]
+        lenlist = np.vectorize(len)
+        weights = lenlist(indices)
+        X = class_X_grouped[tt].to_numpy()
+        M = normal_comp_sd_ab(X, inta, intb)
+        paths = np.column_stack(np.where(M == 1))
+        constr = list()
+        constr.append(M)
+        constr.append(paths)
+        nVar = 2
+        N = X.shape[0]
+
+    elif type == 'ecdf' or type == 'idr':
+        # include checks
+        if org_crps:
+            if type == 'ecdf':
+                original_crps = np.mean(ecdf_crps(y, grid, X))
+
+        M_class = ecdf_comp_class_sd(X, grid)
+        M = M_class[0]
+        class_X = M_class[1]
+        nVar = len(class_X)
+        class_X = pd.DataFrame(data = {'cy' : class_X})
+        #Xp = data.frame(class_X)
+        class_X['y'] = y
+        class_X['ind'] = np.arange(len(y))
+        #tt = list(oldNames)
+        class_X_grouped = class_X.groupby('cy').agg({'y':list, 'ind':list})
+        class_X_grouped = class_X_grouped.reset_index()
+        cpY = class_X_grouped["y"]
+        indices = class_X_grouped["ind"]
+        class_X_sorted = class_X_grouped["cy"]
+
+        vec_indx = np.asarray([x[0] for x in indices])
+        M = M[vec_indx, :][:, vec_indx]
+        paths = np.column_stack(np.where(M == 1))
+        constr = list()
+        constr.append(M)
+        constr.append(paths)
+        lenlist = np.vectorize(len)
+        weights = lenlist(indices)
+        N = len(cpY)
+
+    elif type == 'dis':
+        raise ValueError('type dis not yet implemented')    
+
     else:
-        constr = comp_ord(Xp)
-        cdf = np.zeros((N,nThr-1))
-        A = tr_reduc(constr[0], N)
-        nConstr = A.shape[1]
-        l = np.zeros(nConstr) 
-        A = sparse.csc_matrix((np.repeat([1,-1],nConstr), (np.tile(np.arange(nConstr),2),A.flatten())), shape=(nConstr, N))
-        P = sparse.csc_matrix((weights, (np.arange(N),np.arange(N))))
-        i = 0
-        I = nThr -1
-        #conv =  np.full(I, False, dtype=bool) 
-        q = -weights*np.array(cpY.apply(lambda x: np.mean(np.array(x) <= thresholds[i]))) 
-        m = osqp.OSQP()
-        m.setup(P=P, q=q, A=A, l=l, verbose = verbose, max_iter = max_iter, eps_rel = eps_rel, eps_abs = eps_abs) 
-        sol = m.solve()
-        pmax = np.where(sol.x>0,sol.x,0)
-        cdf[:,0] = np.where(pmax<1, pmax, 1) 
-        if I > 1:
-            if progress:
-                for i in tqdm(range(1,I)):
-                    m.warm_start(x = cdf[:, i - 1])
-                    q = -weights*np.array(cpY.apply(lambda x: np.mean(np.array(x) <= thresholds[i]))) 
-                    m.update(q = q)
-                    sol = m.solve()
-                    pmax = np.where(sol.x>0,sol.x,0)
-                    cdf[:, i] =np.where(pmax<1, pmax, 1)
-            else:
-                for i in range(1,I):
-                    m.warm_start(x = cdf[:, i - 1])
-                    q = -weights*np.array(cpY.apply(lambda x: np.mean(np.array(x) <= thresholds[i]))) 
-                    m.update(q = q)
-                    sol = m.solve()
-                    pmax = np.where(sol.x>0,sol.x,0)
-                    cdf[:, i] =np.where(pmax<1, pmax, 1)
+        raise ValueError('invalid value for type')
+        
+
+    cdf = np.zeros((N,nThr-1))
+    A = tr_reduc(constr[0], N)
+    nConstr = A.shape[1]
+    l = np.zeros(nConstr) 
+    A = sparse.csc_matrix((np.repeat([1,-1],nConstr), (np.tile(np.arange(nConstr),2),A.flatten())), shape=(nConstr, N))
+    P = sparse.csc_matrix((weights, (np.arange(N),np.arange(N))))
+    i = 0
+    I = nThr -1
+    #conv =  np.full(I, False, dtype=bool) 
+    q = -weights*np.array(cpY.apply(lambda x: np.mean(np.array(x) <= thresholds[i]))) 
+    m = osqp.OSQP()
+    m.setup(P=P, q=q, A=A, l=l, verbose = verbose, max_iter = max_iter, eps_rel = eps_rel, eps_abs = eps_abs) 
+    sol = m.solve()
+    pmax = np.where(sol.x>0,sol.x,0)
+    cdf[:,0] = np.where(pmax<1, pmax, 1) 
+    if I > 1:
+        if progress:
+            for i in tqdm(range(1,I)):
+                m.warm_start(x = cdf[:, i - 1])
+                q = -weights*np.array(cpY.apply(lambda x: np.mean(np.array(x) <= thresholds[i]))) 
+                m.update(q = q)
+                sol = m.solve()
+                pmax = np.where(sol.x>0,sol.x,0)
+                cdf[:, i] =np.where(pmax<1, pmax, 1)
+        else:
+            for i in range(1,I):
+                m.warm_start(x = cdf[:, i - 1])
+                q = -weights*np.array(cpY.apply(lambda x: np.mean(np.array(x) <= thresholds[i]))) 
+                m.update(q = q)
+                sol = m.solve()
+                pmax = np.where(sol.x>0,sol.x,0)
+                cdf[:, i] =np.where(pmax<1, pmax, 1)
                 
 
     if nVar > 1:
@@ -625,9 +777,6 @@ def idr (y, X, groups = None, orders = dict({"1":"comp"}), verbose = False, max_
         cdf1 = np.ones((N,nThr))
         cdf1[:,:-1] = cdf
     
-    idr_object = idrobject(ecdf = cdf1, thresholds = thresholds, indices = indices, X = Xp, y = cpY,
-                           groups = groups, orders = orders, constraints = constr)
+    idr_object = idrcal(ecdf = cdf1, thresholds = thresholds, indices = indices, X = Xp, y = cpY,
+                           Ord = constr, grid = grid, type = type, org_crps = original_crps)
     return(idr_object)
-
-
-    

@@ -132,3 +132,52 @@ def neighbor_points(x, X, order_X):
         greater.append(x_leq_X[:,i].nonzero()[0])
         
     return smaller, greater
+
+
+
+
+def ecdf_crps(y, grid, X):
+    dim_n = len(y)
+    
+    def get_cdf(i):
+        return X[i,]
+    def get_grid(i):
+        return grid
+    def modify_points(points):
+        return np.hstack([points[0], np.diff(points)])
+    def crps0(y, p, w, x):
+        return 2*np.sum(w*(np.array((y<x))-p+0.5*w)*np.array(x-y))
+    
+    p = list(map(get_cdf, np.arange(dim_n)))
+    x = list(map(get_grid, np.arange(dim_n)))
+    w = list(map(modify_points, p))
+
+    return(list(map(crps0, y, p, w, x))) 
+
+
+def crps_gaussian_limit(y, mu, scale, inta, intb):
+    y = y-mu
+    lower = inta / scale
+    upper = intb / scale
+    out_l1 = out_u1 = out_l2 = 0
+    out_u2 = 1
+    z = y.copy()
+    ###
+    p_l = norm.cdf(lower)
+    out_l1 = -lower * p_l**2 - 2 * norm.pdf(lower) * p_l
+    #out_l1[lower == -Inf] <- 0
+    out_l2 = norm.cdf(lower, scale = np.sqrt(0.5))
+    z = np.maximum(lower, z)
+    p_u = 1-norm.cdf(upper)
+    out_u1 = upper * p_u**2 - 2 * norm.pdf(upper) * p_u
+    #out_u1[upper == Inf] <- 0
+    out_u2 = norm.cdf(upper, scale = np.sqrt(0.5))
+    z = np.minimum(upper, z)
+    b = out_u2 - out_l2
+    out_z = z * (2 * norm.cdf(z) - 1) + 2 * norm.pdf(z)
+    
+    out = out_z + out_l1 + out_u1 - b / np.sqrt(np.pi)
+    out[(lower > upper) | (lower == upper)] = np.nan
+    out[lower == upper] = 0
+    ###
+    return out + np.absolute(y - z)

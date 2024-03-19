@@ -4,6 +4,7 @@
 #include <pybind11/stl.h>
 #include <vector>
 #include <numeric>
+#include <algorithm>
 
 
 /*
@@ -245,9 +246,238 @@ py::array_t<double> isocdf_seq(py::array_t<double>& w, py::array_t<double>& W, p
 }
 
 
+py::array_t<double> compOrd_cpp(py::array_t<double, py::array::c_style | py::array::forcecast> X) {
+    auto X_buf = X.request();
+    double* X_ptr = (double*) X_buf.ptr;
+    int m = X.shape(0);
+    int d = X.shape(1);
+    py::array_t<double> M = py::array_t<double>({m, m});
+    auto M_buf = M.request();
+    double* M_ptr = (double*) M_buf.ptr;
+    std::fill_n(M_ptr, m*m, 0.0);
+    std::vector<double> vec(2*d);
+    std::vector<double> x1(d);
+    std::vector<double> x2(d);
+
+    M_ptr[(m-1)*m + (m-1)] = 1;
+    for (int i = 0; i < (m-1); i++) {
+        M_ptr[i*m + i] = 1;
+        for (int j = (i+1); j < m; j++) {
+            for (int k = 0; k < d; k++) {
+                vec[k] = x1[k] = X_ptr[i*d + k];
+                vec[d+ k] = x2[k] = X_ptr[j*d + k];
+            }
+
+            std::sort(vec.begin(), vec.end());
+            auto last = std::unique(vec.begin(), vec.end());
+            vec.erase(last, vec.end());
+
+            int nobs = vec.size();
+            std::vector<double> F1(nobs);
+            std::vector<double> F2(nobs);
+            std::sort(x1.begin(), x1.end());
+            std::sort(x2.begin(), x2.end());
+            for (int l = 0; l < nobs; ++l) {
+                F1[l] = std::upper_bound(x1.begin(), x1.end(), vec[l]) - x1.begin();
+                F2[l] = std::upper_bound(x2.begin(), x2.end(), vec[l]) - x2.begin();
+            }
+
+            for (int l = 0; l < nobs; ++l) {
+                F1[l] /= nobs;
+                F2[l] /= nobs;
+            }
+
+            int test = 1;
+            for (int k = 0; k < (nobs-1); k++) {
+                if (F2[k] > F1[k]) {
+                    test = 0;
+                    break;
+                }
+            }
+            if (test == 1) {
+                M_ptr[i*m + j] = 1;
+            }
+            if (M_ptr[i*m + j] == 0) {
+                int test2 = 1;
+                for (int k = 0; k < (nobs-1); k++) {
+                    if (F1[k] > F2[k]) {
+                        test2 = 0;
+                        break;
+                    }
+                }
+                if (test2 == 1) {
+                    M_ptr[j*m + i] = 1;
+                }
+            }
+        }
+    }
+    return M;
+}
+
+py::list ecdf_comp_class_sd(py::array_t<double, py::array::c_style | py::array::forcecast> X, py::array_t<double, py::array::c_style | py::array::forcecast> t) {
+    auto X_buf = X.request();
+    auto X_ptr = static_cast<double *>(X_buf.ptr);
+    auto X_shape = X.shape();
+    int m = X_shape[0];
+    int d = X_shape[1];
+
+    std::vector<int> M_shape = {m, m};
+    py::array_t<double> M(M_shape);
+    auto M_buf = M.request();
+    auto M_ptr = static_cast<double *>(M_buf.ptr);
+
+    std::vector<int> classY(m);
+    int class_count = 1;
+
+    M_ptr[m * (m - 1) + (m - 1)] = 1;
+
+    for (int i = 0; i < (m - 1); i++) {
+        M_ptr[i * m + i] = 1;
+
+        bool class_check = false;
+
+        if (classY[i] == 0) {
+            classY[i] = class_count;
+            class_count += 1;
+            class_check = true;
+        }
+
+        for (int j = (i + 1); j < m; j++) {
+            std::vector<double> F1(d);
+            std::vector<double> F2(d);
+            int d2 = 1;
+            int d3 = 1;
+            bool check_equal = true;
+
+            if (class_check == true) {
+                for (int k = 0; k < d; k++) {
+                    F1[k] = X_ptr[i * d + k];
+                    F2[k] = X_ptr[j * d + k];
+
+                    if (F1[k] != F2[k]) {
+                        check_equal = false;
+                    }
+
+                    if (F1[k] < F2[k]) {
+                        d2 = 0;
+                    }
+
+                    if (F1[k] > F2[k]) {
+                        d3 = 0;
+                    }
+                }
+
+                if (check_equal == true) {
+                    classY[j] = class_count - 1;
+                }
+            } else {
+                for (int k = 0; k < d; k++) {
+                    F1[k] = X_ptr[i * d + k];
+                    F2[k] = X_ptr[j * d + k];
+
+                    if (F1[k] < F2[k]) {
+                        d2 = 0;
+                    }
+
+                    if (F1[k] > F2[k]) {
+                        d3 = 0;
+                    }
+                }
+            }
+
+            M_ptr[i * m + j] = d2;
+            M_ptr[j * m + i] = d3;
+        }
+    }
+
+    if (classY[m - 1] == 0) {
+        classY[m - 1] = class_count;
+    }
+
+    py::list ret;
+    ret.append(M);
+    ret.append(classY);
+
+    return ret;
+}
+
+py::array_t<double> normal_comp_sd(py::array_t<double> X) {
+    // Get the number of rows and columns of X
+    ssize_t m = X.shape(0);
+
+    // Create a NumericMatrix M with dimensions m x m
+    py::array_t<double> M = py::array_t<double>({m, m});
+
+    // Get pointers to the raw data of X and M
+    auto X_ptr = X.unchecked<2>();
+    auto M_ptr = M.mutable_unchecked<2>();
+
+    // Fill in the values of M based on the conditions specified
+    for (ssize_t i = 0; i < (m - 1); ++i) {
+        M_ptr(i, i) = 1.0;
+        for (ssize_t j = (i + 1); j < m; ++j) {
+            if (std::abs(X_ptr(i, 1) - X_ptr(j, 1)) < 1e-9) {
+                if (X_ptr(i, 0) >= X_ptr(j, 0)) {
+                    M_ptr(j, i) = 1.0;
+                }
+                if (X_ptr(j, 0) >= X_ptr(i, 0)) {
+                    M_ptr(i, j) = 1.0;
+                }
+            }
+        }
+    }
+
+    return M;
+}
+
+py::array_t<double> normal_comp_sd_ab(py::array_t<double> X, double a, double b) {
+    // Get the number of rows of X
+    ssize_t m = X.shape(0);
+
+    // Create a NumericMatrix M with dimensions m x m
+    py::array_t<double> M = py::array_t<double>({m, m});
+
+    // Get pointers to the raw data of X and M
+    auto X_ptr = X.unchecked<2>();
+    auto M_ptr = M.mutable_unchecked<2>();
+
+    // Fill in the values of M based on the conditions specified
+    for (ssize_t i = 0; i < (m - 1); ++i) {
+        M_ptr(i, i) = 1.0;
+        for (ssize_t j = (i + 1); j < m; ++j) {
+            double diff = X_ptr(j, 1) - X_ptr(i, 1);
+            if (std::abs(diff) < 1e-9) {
+                if (X_ptr(i, 0) >= X_ptr(j, 0)) {
+                    M_ptr(j, i) = 1.0;
+                }
+                if (X_ptr(j, 0) >= X_ptr(i, 0)) {
+                    M_ptr(i, j) = 1.0;
+                }
+            } else {
+                double num = X_ptr(i, 0) * X_ptr(j, 1) - X_ptr(j, 0) * X_ptr(i, 1);
+                double test = num / diff;
+                if (test < a || test > b) {
+                    if (X_ptr(i, 0) >= X_ptr(j, 0)) {
+                        M_ptr(j, i) = 1.0;
+                    }
+                    if (X_ptr(j, 0) >= X_ptr(i, 0)) {
+                        M_ptr(i, j) = 1.0;
+                    }
+                }
+            }
+        }
+    }
+
+    return M;
+}
+
 
 PYBIND11_MODULE(_isodisSD, m) {
     m.def("isocdf_seq", &isocdf_seq);
+    m.def("compOrd_cpp", &compOrd_cpp);
+    m.def("ecdf_comp_class_sd", &ecdf_comp_class_sd);
+    m.def("normal_comp_sd", &normal_comp_sd);
+    m.def("normal_comp_sd_ab", &normal_comp_sd_ab);
 }
 /*
 <%
