@@ -1,0 +1,17 @@
+LICENSE.txt
+MANIFEST.in
+README.md
+pyproject.toml
+setup.py
+src/isodisSD/__init__.py
+src/isodisSD/isocdf_seq.cpp
+src/isodisSD/load_data.py
+src/isodisSD/modeling_evaluation.py
+src/isodisSD/partialorders.py
+src/isodisSD/pava.py
+src/isodisSD.egg-info/PKG-INFO
+src/isodisSD.egg-info/SOURCES.txt
+src/isodisSD.egg-info/dependency_links.txt
+src/isodisSD.egg-info/requires.txt
+src/isodisSD.egg-info/top_level.txt
+src/isodisSD/packageData/rain.dat

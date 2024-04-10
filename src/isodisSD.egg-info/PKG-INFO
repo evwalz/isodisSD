@@ -1,0 +1,39 @@
+Metadata-Version: 2.1
+Name: isodisSD
+Version: 0.1
+Summary: Isotonic distributional regression (IDR) for real-valued response and corresponding distributional forecasts
+Home-page: https://github.com/evwalz/isodisSD
+Author: Eva-Maria Walz
+Author-email: evamaria.walz@gmx.de
+License: MIT
+License-File: LICENSE.txt
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: matplotlib
+Requires-Dist: scipy
+Requires-Dist: tqdm
+Requires-Dist: dc_stat_think>=1.1.1
+Requires-Dist: osqp>=0.6.1
+
+
+# isodisSD
+
+<!-- badges: start -->
+<!-- badges: end -->
+
+Applies isotonic distributional regression ([IDR](https://academic.oup.com/jrsssb/article/83/5/963/7056107)) for data consisiting of real-valued responses and corresponding probabilistic forecasts
+
+## Installation
+
+To build and install clone repository and run
+
+``` pip install ./isodisSD   ```
+
+## Example
+
+See https://github.com/evwalz/paper_isocrpsdeco
+
+## Reference
+
+https://arxiv.org/abs/2311.14122
+
