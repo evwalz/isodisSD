@@ -255,9 +255,6 @@ py::array_t<double> compOrd_cpp(py::array_t<double, py::array::c_style | py::arr
     auto M_buf = M.request();
     double* M_ptr = (double*) M_buf.ptr;
     std::fill_n(M_ptr, m*m, 0.0);
-    
-   
-
 
     M_ptr[(m-1)*m + (m-1)] = 1;
     for (int i = 0; i < (m-1); i++) {
@@ -406,21 +403,22 @@ py::list ecdf_comp_class_sd(py::array_t<double, py::array::c_style | py::array::
     return ret;
 }
 
+
 py::list ecdf_list_comp_class_sd(py::list X, py::list t) {
     int m = X.size();
     py::array_t<double> M({m, m});
-    py::array_t<double> classY(m);
     int class_count = 1;
     auto M_ptr = M.mutable_unchecked<2>();
-    auto classY_ptr = classY.mutable_unchecked<1>();
+    std::vector<double> classY(m, 0);
+
 
     M_ptr(m-1, m-1) = 1;
 
     for (int i = 0; i < (m-1); i++) {
         M_ptr(i, i) = 1;
         bool class_check = false;
-        if (classY_ptr(i) == 0){
-            classY_ptr(i) = class_count;
+        if (classY[i] == 0){
+            classY[i] = class_count;
             class_count += 1;
             class_check = true;
         }
@@ -491,21 +489,25 @@ py::list ecdf_list_comp_class_sd(py::list X, py::list t) {
                 }
             }
 
+
             if (class_check == true && check_equal == true) {
-                classY_ptr(j) = class_count - 1;
+                classY[j] = class_count - 1;
             }
+            
             M_ptr(i, j) = d2;
             M_ptr(j, i) = d3;
         }
     }
-    if (classY_ptr(m-1) == 0){
-        classY_ptr(m-1) = class_count;
+    if (classY[m-1] == 0){
+        classY[m-1] = class_count;
     }
+
     py::list ret;
     ret.append(M);
     ret.append(classY);
     return ret;
 }
+
 
 
 py::array_t<double> normal_comp_sd(py::array_t<double> X) {
@@ -582,6 +584,188 @@ py::array_t<double> normal_comp_sd_ab(py::array_t<double> X, double a, double b)
 
 
 
+py::list new_func2_sd(py::array_t<double, py::array::c_style> X, py::array_t<double, py::array::c_style> x) {    
+    auto X_buf = X.request();
+    auto x_buf = x.request();
+    double* X_ptr = (double*) X_buf.ptr;
+    double* x_ptr = (double*) x_buf.ptr;
+    int mX = X.shape(0);
+    int d = X.shape(1);
+    int mx = x.shape(0);
+
+
+    py::array_t<int> smaller_indx = py::array_t<int>({mx, mX}, 0);
+    auto smaller_indx_buf = smaller_indx.request();
+    int* smaller_indx_ptr = (int*) smaller_indx_buf.ptr;
+    
+
+    py::array_t<int> greater_indx = py::array_t<int>({mx, mX}, 0);
+    auto greater_indx_buf = greater_indx.request();
+    int* greater_indx_ptr = (int*) greater_indx_buf.ptr;
+
+    
+    for (int i = 0; i < mx; i++) {
+        for (int j = 0; j < mX; j++) {
+            smaller_indx_ptr[i*mX + j] = 0;
+            greater_indx_ptr[i*mX + j] = 0;
+            std::vector<double> vec(2*d);
+            std::vector<double> x1(d);
+            std::vector<double> x2(d);
+            for (int k = 0; k < d; k++) {
+                vec[k] = x1[k] = x_ptr[i*d + k];
+                vec[d+ k] = x2[k] = X_ptr[j*d + k];
+            }
+
+            std::sort(vec.begin(), vec.end());
+            auto last = std::unique(vec.begin(), vec.end());
+            vec.erase(last, vec.end());
+
+            int nobs = vec.size();
+            std::vector<double> F1(nobs);
+            std::vector<double> F2(nobs);
+            std::sort(x1.begin(), x1.end());
+            std::sort(x2.begin(), x2.end());
+            for (int l = 0; l < nobs; ++l) {
+                F1[l] = std::upper_bound(x1.begin(), x1.end(), vec[l]) - x1.begin();
+                F2[l] = std::upper_bound(x2.begin(), x2.end(), vec[l]) - x2.begin();
+            }
+
+            for (int l = 0; l < nobs; ++l) {
+                F1[l] /= d;
+                F2[l] /= d;
+            }
+
+            
+            int test = 1;
+            for (int k = 0; k < (nobs); k++) {
+                if (F2[k] > F1[k]) {
+                    test = 0;
+                    break;
+                }
+            }
+            if (test == 1) {
+                greater_indx_ptr[i*mX + j] = 1;
+            }
+            int test2 = 1;
+            for (int k = 0; k < (nobs); k++) {
+                if (F1[k] > F2[k]) {
+                    test2 = 0;
+                    break;
+                }
+            }
+            if (test2 == 1) {
+                smaller_indx_ptr[i*mX + j] = 1;
+            }
+            
+        }
+    }
+    
+    py::list ret;
+    ret.append(smaller_indx);
+    ret.append(greater_indx);
+    return ret;
+}
+
+
+py::list new_func_list_sd(py::list X, py::list x, py::list gridx, py::list gridX) {    
+    int mX = X.size();
+    int mx = x.size();
+
+    py::array_t<int> smaller_indx = py::array_t<int>({mx, mX}, 0);
+    auto smaller_indx_buf = smaller_indx.request();
+    int* smaller_indx_ptr = (int*) smaller_indx_buf.ptr;
+    
+
+    py::array_t<int> greater_indx = py::array_t<int>({mx, mX}, 0);
+    auto greater_indx_buf = greater_indx.request();
+    int* greater_indx_ptr = (int*) greater_indx_buf.ptr;
+
+    
+    for (int i = 0; i < mx; i++) {
+        std::vector<double> x1 = py::cast<std::vector<double>>(x[i]);
+        std::vector<double> t1 = py::cast<std::vector<double>>(gridx[i]);
+        int t_l1 = t1.size();
+        for (int j = 0; j < mX; j++) {
+            smaller_indx_ptr[i*mX + j] = 0;
+            greater_indx_ptr[i*mX + j] = 0;
+            std::vector<double> x2 = py::cast<std::vector<double>>(X[j]);
+            std::vector<double> t2 = py::cast<std::vector<double>>(gridX[j]);
+            int t_l2 = t2.size();
+            int dim_thresh = t_l1 + t_l2; 
+            std::vector<double> thresholds(dim_thresh);
+
+            for (int l = 0; l < t_l1; l++) {
+                thresholds[l] = t1[l];
+            }
+            for (int l = t_l1; l < dim_thresh; l++) {
+                thresholds[l] = t2[l-t_l1];
+            }
+
+
+            std::sort(thresholds.begin(), thresholds.end());
+            auto last = std::unique(thresholds.begin(), thresholds.end());
+            thresholds.erase(last, thresholds.end());
+
+            int d = thresholds.size();
+            std::vector<double> F1(d);
+            std::vector<double> F2(d);
+
+            for (int k = 0; k < d; k++) {
+                int indx1 = 0;
+                int indx2 = 0;
+                while(indx1 < t_l1 && thresholds[k] >= t1[indx1]){
+                    indx1 += 1;
+                }
+                if (indx1 == 0){
+                    F1[k] = 0;
+                } else {
+                    F1[k] = x1[indx1 - 1];
+                }
+                while(indx2 < t_l2 && thresholds[k] >= t2[indx2]){
+                    indx2 += 1;
+                }
+                if (indx2 == 0){
+                    F2[k] = 0;
+                } else {
+                    F2[k] = x2[indx2-1];
+                }
+            }
+            
+            int test = 1;
+            for (int k = 0; k < (d); k++) {
+                if (F2[k] > F1[k]) {
+                    test = 0;
+                    break;
+                }
+            }
+            if (test == 1) {
+                greater_indx_ptr[i*mX + j] = 1;
+            }
+            int test2 = 1;
+            for (int k = 0; k < d; k++) {
+                if (F1[k] > F2[k]) {
+                    test2 = 0;
+                    break;
+                }
+            }
+            if (test2 == 1) {
+                smaller_indx_ptr[i*mX + j] = 1;
+            }
+            
+        }
+    }
+    
+    py::list ret;
+    ret.append(smaller_indx);
+    ret.append(greater_indx);
+    return ret;
+}
+
+
+
+
+
+
 PYBIND11_MODULE(_isodisSD, m) {
     m.def("isocdf_seq", &isocdf_seq);
     m.def("compOrd_cpp", &compOrd_cpp);
@@ -589,6 +773,8 @@ PYBIND11_MODULE(_isodisSD, m) {
     m.def("ecdf_list_comp_class_sd", &ecdf_list_comp_class_sd);
     m.def("normal_comp_sd", &normal_comp_sd);
     m.def("normal_comp_sd_ab", &normal_comp_sd_ab);
+    m.def("new_func2_sd", &new_func2_sd);
+    m.def("new_func_list_sd", &new_func_list_sd);
 }
 /*
 <%
