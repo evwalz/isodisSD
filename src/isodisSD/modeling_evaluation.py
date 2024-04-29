@@ -8,12 +8,12 @@ from tqdm import tqdm
 import dc_stat_think as dcst
 from collections import defaultdict
 import osqp
-from .pava import pavaDec, pavaCorrect
+#from .pava import pavaCorrect, pavaCorrect2
 from .partialorders import comp_ord, tr_reduc, neighbor_points, ecdf_crps, neighborPoints, neighborPoints3, crps_gaussian_limit, neighborPoints_norm
 import random
 import bisect
 import properscoring as ps
-from _isodisSD import isocdf_seq, ecdf_comp_class_sd, ecdf_list_comp_class_sd, compOrd_cpp, normal_comp_sd, normal_comp_sd_ab
+from _isodisSD import isocdf_seq, ecdf_comp_class_sd, ecdf_list_comp_class_sd, compOrd_cpp, normal_comp_sd, normal_comp_sd_ab, pavaCorrect_c
 
 class predictions_idr(object):
 
@@ -760,6 +760,7 @@ def idrsd (y, X = None,grid = None, dis_func = None, input_type = 'ensemble' ,in
         raise ValueError('invalid value for input_type')
         
 
+    
     cdf = np.zeros((N,nThr-1))
     A = tr_reduc(constr[1], N)
     nConstr = A.shape[1]
@@ -794,8 +795,14 @@ def idrsd (y, X = None,grid = None, dis_func = None, input_type = 'ensemble' ,in
                 cdf[:, i] =np.where(pmax<1, pmax, 1)
                 
 
+    
     if nVar > 1:
-        cdf = pavaCorrect(cdf)
+        
+        #cdf_cl = pavaCorrect2(cdf)
+        #cdf2 = np.ones((N,nThr))
+        #cdf2[:,:-1] = cdf_cl
+        
+        cdf = pavaCorrect_c(cdf)
         cdf1 = np.ones((N,nThr))
         cdf1[:,:-1] = cdf
     

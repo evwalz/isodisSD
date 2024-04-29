@@ -14,6 +14,7 @@ Requires-Dist: scipy
 Requires-Dist: tqdm
 Requires-Dist: dc_stat_think>=1.1.1
 Requires-Dist: osqp>=0.6.1
+Requires-Dist: numba
 
 
 # isodisSD

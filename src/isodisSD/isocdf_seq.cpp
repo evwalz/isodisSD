@@ -807,9 +807,118 @@ py::list indx_norm_sd(py::array_t<double, py::array::c_style> X, py::array_t<dou
     return ret;
 }
 
+py::array_t<double> pavaCorrect_c2(py::array_t<double, py::array::c_style> y) {
+    auto y_buf = y.request();
+    auto y_ptr = static_cast<double *>(y_buf.ptr);
+    auto y_shape = y.shape();
 
+    int n = y_shape[0];
+    int m = y_shape[1];
 
+    py::array_t<double> out({n, m});
+    auto out_buf = out.request();
+    auto out_ptr = static_cast<double *>(out_buf.ptr);
 
+    double weight[m];
+    int index[m];
+    int ci = 0;
+    int j = 0;
+    int i;
+    double nw;
+
+    for (int k = 0; k < n; k++) {
+        index[ci] = 0;
+        weight[ci] = 1;
+        out_ptr[k * m + ci] = y_ptr[k * n];
+
+        while (j < m - 1) {
+            j += 1;
+            ci += 1;
+            index[ci] = j;
+            weight[ci] = 1;
+            out_ptr[k * m  + ci] = y_ptr[k * n + j];
+
+            while (ci >= 1 && out_ptr[k * m  + ci]  <= out_ptr[k * m  + ci - 1] ) {
+                nw = weight[ci - 1] + weight[ci];
+                out_ptr[k * m + (ci - 1) ] += (weight[ci] / nw) * (out_ptr[k *  m + ci] - out_ptr[k * m + (ci - 1) ]);
+                weight[ci - 1] = nw;
+                ci -= 1;
+            }
+        }
+
+        while (j >= 0) {
+            for (i = index[ci]; i <= j; i++) {
+                out_ptr[k * m + i ] = out_ptr[k * m + ci ];
+            }
+            j = index[ci] - 1;
+            ci -= 1;
+        }
+
+        ci = 0;
+        j = 0;
+        // Here you can add the Python interrupt check if needed
+    }
+
+    return out;
+}
+
+py::array_t<double> pavaCorrect_c(py::array_t<double, py::array::c_style> y) {
+    auto y_buf = y.request();
+    double *y_ptr = static_cast<double *>(y_buf.ptr);
+    auto y_shape = y_buf.shape;
+    auto y_strides = y_buf.strides;
+
+    int n = y_shape[0];
+    int m = y_shape[1];
+
+    py::array_t<double> out({n, m});
+    auto out_buf = out.request();
+    double *out_ptr = static_cast<double *>(out_buf.ptr);
+    auto out_shape = out_buf.shape;
+    auto out_strides = out_buf.strides;
+
+    double weight[m];
+    int index[m];
+    int ci = 0, j = 0;
+    double nw;
+
+    for (int k = 0; k < n; k++) {
+        index[ci] = 0;
+        weight[ci] = 1;
+
+        out_ptr[k * m + ci] = y_ptr[k * m];
+
+        while (j < m - 1) {
+            j += 1;
+            ci += 1;
+            index[ci] = j;
+            weight[ci] = 1;
+            
+            out_ptr[k *m + ci ] = y_ptr[k *m + j ];
+
+            while (ci >= 1 && out_ptr[k * m + ci] <= out_ptr[k * m + (ci - 1) ]) {
+                nw = weight[ci - 1] + weight[ci];
+                out_ptr[k *m + (ci - 1) ] += (weight[ci] / nw) * (out_ptr[k * m + ci ] - out_ptr[k *m + (ci - 1) ]);
+                weight[ci - 1] = nw;
+                ci -= 1;
+            }
+        }
+
+        while (j >= 0) {
+            for (int i = index[ci]; i <= j; i++) {
+                out_ptr[k * m + i ] = out_ptr[k * m + ci ];
+            }
+            j = index[ci] - 1;
+            ci -= 1;
+        }
+
+        ci = 0;
+        j = 0;
+        // Add code to check for user interrupt if needed
+    }
+
+    return out;
+}
 
 
 PYBIND11_MODULE(_isodisSD, m) {
@@ -822,7 +931,9 @@ PYBIND11_MODULE(_isodisSD, m) {
     m.def("new_func2_sd", &new_func2_sd);
     m.def("new_func_list_sd", &new_func_list_sd);
     m.def("indx_norm_sd", &indx_norm_sd);
+    m.def("pavaCorrect_c", &pavaCorrect_c);
 }
+
 /*
 <%
 setup_pybind11(cfg)
