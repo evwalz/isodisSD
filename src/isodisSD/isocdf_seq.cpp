@@ -762,6 +762,52 @@ py::list new_func_list_sd(py::list X, py::list x, py::list gridx, py::list gridX
 }
 
 
+py::list indx_norm_sd(py::array_t<double, py::array::c_style> X, py::array_t<double, py::array::c_style> x) {    
+    auto X_buf = X.request();
+    auto x_buf = x.request();
+    double* X_ptr = (double*) X_buf.ptr;
+    double* x_ptr = (double*) x_buf.ptr;
+    int mX = X.shape(0);
+    int mx = x.shape(0);
+
+    
+    py::array_t<int> smaller_indx = py::array_t<int>({mx, mX}, 0);
+    auto smaller_indx_buf = smaller_indx.request();
+    int* smaller_indx_ptr = (int*) smaller_indx_buf.ptr;
+    
+
+    py::array_t<int> greater_indx = py::array_t<int>({mx, mX}, 0);
+    auto greater_indx_buf = greater_indx.request();
+    int* greater_indx_ptr = (int*) greater_indx_buf.ptr;
+
+    for (int i = 0; i < mx; i++) {
+        double sigma1 = x_ptr[i*2 + 1];
+        double mu1 = x_ptr[i*2];
+        for (int j = 0; j < mX; j++) {
+            double sigma2 = X_ptr[j*2 + 1];
+            double mu2 = X_ptr[j*2];
+            smaller_indx_ptr[i*mX + j] = 0;
+            greater_indx_ptr[i*mX + j] = 0;
+
+
+            if (std::abs(sigma2 - sigma1) < 1e-9) {
+                if (mu1 >= mu2) {  
+                    smaller_indx_ptr[i*mX + j] = 1;
+                }
+                if (mu2 >= mu1) {
+                    greater_indx_ptr[i*mX + j] = 1;
+                }
+            }
+        }
+    }
+
+    py::list ret;
+    ret.append(smaller_indx);
+    ret.append(greater_indx);
+    return ret;
+}
+
+
 
 
 
@@ -775,6 +821,7 @@ PYBIND11_MODULE(_isodisSD, m) {
     m.def("normal_comp_sd_ab", &normal_comp_sd_ab);
     m.def("new_func2_sd", &new_func2_sd);
     m.def("new_func_list_sd", &new_func_list_sd);
+    m.def("indx_norm_sd", &indx_norm_sd);
 }
 /*
 <%

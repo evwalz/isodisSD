@@ -1,9 +1,10 @@
 import numpy as np
 import scipy.stats
 import pandas as pd
+from scipy.stats import norm
 pd.options.mode.chained_assignment = None
 
-from _isodisSD import new_func2_sd, new_func_list_sd
+from _isodisSD import new_func2_sd, new_func_list_sd, indx_norm_sd
 #, new_func_mat_sd, new_func_mat_list_sd, new_func_list_sd, new_func_list_mat_sd
 
 def comp_ord(X):
@@ -252,3 +253,32 @@ def neighborPoints3(x, X, gridx, gridX, M):
         greater.append(ix2[np.where(np.sum(Mgreaterreduced, axis=0) == 1)[0]])
 
     return smaller, greater
+
+
+def neighborPoints_norm(data, X, M):
+    mx = data.shape[0]
+
+    list_indx = indx_norm_sd(X, data)
+
+    smaller_indx = list_indx[0]
+    greater_indx = list_indx[1]
+
+    smaller = list()
+    greater = list()
+
+    for i in range(mx):
+
+        ix1 = np.where(smaller_indx[i] == 1)[0]
+        ix2 = np.where(greater_indx[i] == 1)[0]
+
+        Msmallerreduced = M[np.ix_(ix1, ix1)]
+        smaller.append(ix1[np.where(np.sum(Msmallerreduced, axis=1) == 1)[0]])
+
+        Mgreaterreduced = M[np.ix_(ix2, ix2)]
+        greater.append(ix2[np.where(np.sum(Mgreaterreduced, axis=0) == 1)[0]])
+
+    return smaller, greater
+
+
+
+

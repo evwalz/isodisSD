@@ -9,7 +9,7 @@ import dc_stat_think as dcst
 from collections import defaultdict
 import osqp
 from .pava import pavaDec, pavaCorrect
-from .partialorders import comp_ord, tr_reduc, neighbor_points, ecdf_crps, neighborPoints, neighborPoints3
+from .partialorders import comp_ord, tr_reduc, neighbor_points, ecdf_crps, neighborPoints, neighborPoints3, crps_gaussian_limit, neighborPoints_norm
 import random
 import bisect
 import properscoring as ps
@@ -387,11 +387,13 @@ class idrcal:
                 smaller, greater = neighborPoints(data, X, M)
                 #return neighborPoints(data, X, M)
 
+
             elif (input_type == 'normal' or input_type == 'normal_ab'):
-                raise ValueError("normal not yet implemented")
-            
-            elif (input_type == 'dis'):
-                raise ValueError("dis not yet implemented")
+                M = self.constr[0]
+                smaller, greater = neighborPoints_norm(data, X, M)
+                
+            #elif (input_type == 'dis'):
+            #    raise ValueError("dis not yet implemented")
             
             else:
                 raise ValueError("wrong input_type")
@@ -630,7 +632,7 @@ def idrsd (y, X = None,grid = None, dis_func = None, input_type = 'ensemble' ,in
         tt = list(oldNames)
         Xp['y'] = y
         Xp['ind'] = np.arange(len(y))
-        class_X_grouped = class_X.groupby(tt).agg({'y':list, 'ind':list})
+        class_X_grouped = Xp.groupby(tt).agg({'y':list, 'ind':list})
         class_X_grouped = class_X_grouped.reset_index()
         cpY = class_X_grouped["y"]
         indices = class_X_grouped["ind"]
@@ -684,7 +686,7 @@ def idrsd (y, X = None,grid = None, dis_func = None, input_type = 'ensemble' ,in
         tt = list(oldNames)
         Xp['y'] = y
         Xp['ind'] = np.arange(len(y))
-        class_X_grouped = class_X.groupby(tt).agg({'y':list, 'ind':list})
+        class_X_grouped = Xp.groupby(tt).agg({'y':list, 'ind':list})
         class_X_grouped = class_X_grouped.reset_index()
         cpY = class_X_grouped["y"]
         indices = class_X_grouped["ind"]
@@ -751,8 +753,8 @@ def idrsd (y, X = None,grid = None, dis_func = None, input_type = 'ensemble' ,in
         else:
             Xp = X[vec_indx,]
 
-    elif input_type == 'dis':
-        raise ValueError('input_type dis not yet implemented')    
+    #elif input_type == 'dis':
+    #    raise ValueError('input_type dis not yet implemented')    
 
     else:
         raise ValueError('invalid value for input_type')
