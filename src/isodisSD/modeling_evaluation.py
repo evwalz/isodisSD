@@ -132,7 +132,8 @@ class idrsdpredict(object):
             raise ValueError("y must have same length as predictions")
     
         def pit0 (data, y):
-            return(interp1d(x = np.hstack([np.min(data.points), data.points]), y = np.hstack([0,data.ecdf]), kind='previous', fill_value="extrapolate")(y))
+            return(interp1d_adapt(x = np.hstack([np.min(data.points), data.points]), y = np.hstack([0,data.ecdf]), thresholds = y))
+            #return(interp1d(x = np.hstack([np.min(data.points), data.points]), y = np.hstack([0,data.ecdf]), kind='previous', fill_value="extrapolate")(y))
     
         pitVals = np.array(list(map(pit0, predictions, list(y))))
         if randomize:
@@ -176,7 +177,8 @@ class idrsdpredict(object):
     
         def cdf0 (data):
         # f2 = interp1d(x, y, kind='next')
-            return(interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.ecdf]), kind='previous', fill_value="extrapolate")(thresholds))
+            return(interp1d_adapt(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.ecdf]), thresholds = thresholds))
+            #return(interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.ecdf]), kind='previous', fill_value="extrapolate")(thresholds))
     
         return(np.vstack(list(map(cdf0, predictions))).squeeze())
 
@@ -203,21 +205,24 @@ class idrsdpredict(object):
         """
         predictions = self.predictions
         data = predictions[index]
-        stepfun = interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.ecdf]), kind='previous', fill_value="extrapolate")
+        #stepfun = interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.ecdf]), kind='previous', fill_value="extrapolate")
+        stepfun_vals = interp1d_adapt(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.ecdf]),thresholds = xnew)
         xnew = np.linspace(np.min(data.points), np.max(data.points), num=1001, endpoint=True)
-        plt.plot(np.hstack([np.min(data.points),xnew]), np.hstack([0,stepfun(xnew)]), color=col_cdf)
+        plt.plot(np.hstack([np.min(data.points),xnew]), np.hstack([0,stepfun_vals]), color=col_cdf)
         plt.axhline(y = 0, linestyle = ':', color = 'grey')
         plt.axhline(y = 1, linestyle = ':', color = 'grey')
         #if bounds and "upper" in data:
         if bounds and len(data.upper) > 0:
             if any(data.lower > 0 ):
-                stepfun2 = interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.lower]), kind='previous', fill_value="extrapolate")
-                plt.plot(np.hstack([np.min(data.points),xnew]), np.hstack([0,stepfun2(xnew)]), color = col_bounds, linestyle = ':')
+                #stepfun2 = interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.lower]), kind='previous', fill_value="extrapolate")
+                stepfun2_vals = interp1d_adapt(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.lower]),thresholds = xnew)
+                plt.plot(np.hstack([np.min(data.points),xnew]), np.hstack([0,stepfun2_vals]), color = col_bounds, linestyle = ':')
             else:    
                 plt.hlines(y = 0, xmin = np.min(xnew), xmax = np.max(xnew), color = col_bounds, linestyle = ':')
             if any(data.upper < 1):
-                stepfun3 = interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.upper]), kind='previous', fill_value="extrapolate")
-                plt.plot(np.hstack([np.min(data.points),xnew]), np.hstack([0,stepfun3(xnew)]), color = col_bounds, linestyle = ':')
+                stepfun3_vals = interp1d_adapt(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.upper]), thresholds = xnew)
+                #stepfun3 = interp1d(x = np.hstack([np.min(data.points),data.points]), y = np.hstack([0,data.upper]), kind='previous', fill_value="extrapolate")
+                plt.plot(np.hstack([np.min(data.points),xnew]), np.hstack([0,stepfun3_vals]), color = col_bounds, linestyle = ':')
             else:
                 plt.hlines(y = 1,  xmin = np.min(xnew), xmax = np.max(xnew), color = col_bounds, linestyle = ':')
         plt.title("IDR predictive CDF")
@@ -285,12 +290,13 @@ class idrsdpredict(object):
 
         """
         predictions = self.predictions
-        quantiles = np.array(quantiles)
+        quantiles = np.asarray(quantiles)
         if np.min(quantiles) < 0 or np.max(quantiles) > 1:
             raise ValueError("quantiles must be a numeric vector with entries in [0,1]")
     
         def q0 (data):
-            return(interp1d(x = np.hstack([data.ecdf, np.max(data.ecdf)]), y =np.hstack([data.points,data.points[-1]]) ,kind='next', fill_value="extrapolate")(quantiles))
+            return(interp1d_adapt_q(x = np.hstack([data.ecdf, np.max(data.ecdf)]), y =np.hstack([data.points,data.points[-1]]) ,thresholds = quantiles))
+            #return(interp1d(x = np.hstack([data.ecdf, np.max(data.ecdf)]), y =np.hstack([data.points,data.points[-1]]) ,kind='next', fill_value="extrapolate")(quantiles))
 
         return(np.vstack(list(map(q0, predictions))).squeeze())
     
@@ -842,3 +848,41 @@ def isodeco_crps(y, X = None,grid = None, dis_func = None, input_type = 'ensembl
     'CRPS': crps_original
     }   
     return result
+
+
+def interp1d_adapt(x , y , thresholds):
+    min_points = np.min(x)
+    if np.any(thresholds < min_points):
+        if thresholds.ndim == 0:
+            return(interp1d(x , y , kind='next', fill_value="extrapolate")(thresholds))
+        else:
+            ix1 = np.where(thresholds < min_points)[0]
+            ix2 = np.where(thresholds >= min_points)[0]
+            len_all = len(ix1) + len(ix2)
+            inter_vals = np.zeros(len_all)
+            if ix1.size > 0:
+                inter_vals[ix1] = interp1d(x , y , kind='next', fill_value="extrapolate")(thresholds[ix1])
+            if ix2.size > 0:
+                inter_vals[ix2] = interp1d(x , y , kind='previous', fill_value="extrapolate")(thresholds[ix2])
+            return(inter_vals)
+    else:
+        return(interp1d(x , y , kind='previous', fill_value="extrapolate")(thresholds))
+    
+
+def interp1d_adapt_q(x , y , thresholds):
+    min_points = np.max(x)
+    if np.any(thresholds > min_points):
+        if thresholds.ndim == 0:
+            return(interp1d(x , y , kind='previous', fill_value="extrapolate")(thresholds))
+        else:
+            ix1 = np.where(thresholds > min_points)[0]
+            ix2 = np.where(thresholds <= min_points)[0]
+            len_all = len(ix1) + len(ix2)
+            inter_vals = np.zeros(len_all)
+            if ix1.size > 0:
+                inter_vals[ix1] = interp1d(x , y , kind='previous', fill_value="extrapolate")(thresholds[ix1])
+            if ix2.size > 0:
+                inter_vals[ix2] = interp1d(x , y , kind='next', fill_value="extrapolate")(thresholds[ix2])
+            return(inter_vals)
+    else:
+        return(interp1d(x , y , kind='next', fill_value="extrapolate")(thresholds))
